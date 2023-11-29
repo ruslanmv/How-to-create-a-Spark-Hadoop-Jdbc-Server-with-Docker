@@ -1,5 +1,4 @@
 #!/bin/bash
-
 # Load environment variables
 source /usr/local/bin/env.sh
 

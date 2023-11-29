@@ -18,10 +18,19 @@ ENV HADOOP_VERSION 3.3.1
 ENV SPARK_VERSION 3.3.3
 ENV AMBARI_VERSION 2.7.7
 ENV POSTGRES_VERSION 14
+ENV JAVA_HOME /usr/local/openjdk-11
 
 # Install dependencies
 RUN apt-get update && \
-    apt-get install -y curl wget gnupg2 lsb-release
+    apt-get install -y curl wget gnupg2 lsb-release openssh-server libsnappy-dev
+
+# Set up SSH server
+RUN mkdir /var/run/sshd && \
+    echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config && \
+    echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
+
+# Set root password
+RUN echo 'root:password' | chpasswd
 
 # Add PostgreSQL repository and key
 RUN echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list && \
@@ -32,19 +41,31 @@ RUN apt-get update && \
     apt-get install -y postgresql-${POSTGRES_VERSION}
 
 # Download and install Hadoop
-#https://downloads.apache.org/hadoop/common/hadoop-3.3.1/hadoop-3.3.1.tar.gz
 RUN wget https://downloads.apache.org/hadoop/common/hadoop-${HADOOP_VERSION}/hadoop-${HADOOP_VERSION}.tar.gz && \
     tar -xzf hadoop-${HADOOP_VERSION}.tar.gz && \
     mv hadoop-${HADOOP_VERSION} /usr/local/hadoop && \
     rm hadoop-${HADOOP_VERSION}.tar.gz
 
+# Create a non-root user for running Hadoop, YARN, and Spark services
+RUN useradd -ms /bin/bash hadoopuser
+# Set password for the hadoopuser
+RUN echo 'hadoopuser:password' | chpasswd
+
 # Configure Hadoop environment variables
 ENV HADOOP_HOME /usr/local/hadoop
 ENV HADOOP_CONF_DIR ${HADOOP_HOME}/etc/hadoop
+ENV HDFS_NAMENODE_USER hadoopuser
+ENV HDFS_DATANODE_USER hadoopuser
+ENV HDFS_SECONDARYNAMENODE_USER hadoopuser
+ENV YARN_RESOURCEMANAGER_USER hadoopuser
+ENV YARN_NODEMANAGER_USER hadoopuser
 ENV PATH $PATH:${HADOOP_HOME}/bin:${HADOOP_HOME}/sbin
 
+# Set JAVA_HOME for Hadoop
+RUN echo "export JAVA_HOME=${JAVA_HOME}" >> ${HADOOP_HOME}/etc/hadoop/hadoop-env.sh && \
+    echo "export PATH=\$JAVA_HOME/bin:\$PATH" >> ${HADOOP_HOME}/etc/hadoop/hadoop-env.sh
+
 # Download and install Spark
-#https://downloads.apache.org/spark/spark-3.3.3/spark-3.3.3-bin-without-hadoop.tgz
 RUN wget https://downloads.apache.org/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-without-hadoop.tgz && \
     tar -xzf spark-${SPARK_VERSION}-bin-without-hadoop.tgz && \
     mv spark-${SPARK_VERSION}-bin-without-hadoop /usr/local/spark && \
@@ -54,50 +75,75 @@ RUN wget https://downloads.apache.org/spark/spark-${SPARK_VERSION}/spark-${SPARK
 ENV SPARK_HOME /usr/local/spark
 ENV PATH $PATH:${SPARK_HOME}/bin:${SPARK_HOME}/sbin
 
-# Download and install Ambari
-#https://downloads.apache.org/ambari/ambari-2.7.7/apache-ambari-2.7.7-src.tar.gz
+# Set JAVA_HOME for Spark
+RUN mkdir -p ${SPARK_HOME}/conf && \
+    echo "export JAVA_HOME=${JAVA_HOME}" >> ${SPARK_HOME}/conf/spark-env.sh && \
+    echo "export PATH=\$JAVA_HOME/bin:\$PATH" >> ${SPARK_HOME}/conf/spark-env.sh
 
+# Download SLF4J library
+RUN wget https://repo1.maven.org/maven2/org/slf4j/slf4j-api/1.7.32/slf4j-api-1.7.32.jar && \
+    wget https://repo1.maven.org/maven2/org/slf4j/slf4j-log4j12/1.7.32/slf4j-log4j12-1.7.32.jar
+
+# Copy SLF4J library to Spark jars directory
+RUN cp slf4j-api-1.7.32.jar ${SPARK_HOME}/jars/ && \
+    cp slf4j-log4j12-1.7.32.jar ${SPARK_HOME}/jars/
+
+# Copy Hadoop AWS dependencies to Spark
+RUN cp ${HADOOP_HOME}/share/hadoop/tools/lib/*.jar ${SPARK_HOME}/jars/
+
+# Download and install Ambari
 RUN wget https://downloads.apache.org/ambari/ambari-${AMBARI_VERSION}/apache-ambari-${AMBARI_VERSION}-src.tar.gz && \
     tar -xzf apache-ambari-${AMBARI_VERSION}-src.tar.gz && \
     mv apache-ambari-${AMBARI_VERSION}-src /usr/local/ambari && \
     rm apache-ambari-${AMBARI_VERSION}-src.tar.gz
 
-# Configure Ambari environment variables
+# Set the AMBARI_HOME environment variable
 ENV AMBARI_HOME /usr/local/ambari
-ENV PATH $PATH:${AMBARI_HOME}/bin
 
+COPY env.sh /usr/local/bin/env.sh
+RUN chmod +x /usr/local/bin/env.sh
+# Copy the start-all.sh script to the container
+COPY start-all.sh /usr/local/bin/start-all.sh
+RUN chmod +x /usr/local/bin/start-all.sh
 # Expose necessary ports
-EXPOSE 8080 50070 9000 9870 9864 8888  5432
+EXPOSE 8080 50070 9000 9870 9864 8888 5432 22
 
-# Set the working directory for the Maven project
-WORKDIR /app
-# Copy the Maven project to the container
-#COPY . .
-# Build the Maven project
-#RUN mvn clean package
-# Start the services
-CMD ["start-all.sh"]
+#CMD ["/usr/local/bin/start-all.sh"]
+CMD ["/bin/bash", "/usr/local/bin/start-all.sh"]
+
 ```
 
 Save the Dockerfile.
+## Step 2: Create the env.sh Script
+Create another file named `env.sh` in the same directory as the Dockerfile. Open it in a text editor and copy the following code:
+```bash
+export JAVA_HOME=/usr/local/openjdk-11
+export HADOOP_HOME=/usr/local/hadoop
+export HADOOP_CONF_DIR=${HADOOP_HOME}/etc/hadoop
+export SPARK_HOME=/usr/local/spark
+export HADOOP_CLASSPATH=$(hadoop classpath)
+export SPARK_DIST_CLASSPATH=$(${HADOOP_HOME}/bin/hadoop classpath)
+export PATH=$PATH:${JAVA_HOME}/bin:${HADOOP_HOME}/bin:${HADOOP_HOME}/sbin:${SPARK_HOME}/bin:${SPARK_HOME}/sbin
+```
 
-## Step 2: Create the start-all.sh Script
+
+## Create the start-all.sh Script
 Create another file named `start-all.sh` in the same directory as the Dockerfile. Open it in a text editor and copy the following code:
 
 ```bash
 #!/bin/bash
+# Load environment variables
+source /usr/local/bin/env.sh
 
 # Start Hadoop services
 $HADOOP_HOME/sbin/start-dfs.sh
 $HADOOP_HOME/sbin/start-yarn.sh
 
-# Start Ambari server and agent
-$AMBARI_HOME/sbin/ambari-server start
-$AMBARI_HOME/sbin/ambari-agent start
-
 # Start Spark master and worker
 $SPARK_HOME/sbin/start-master.sh
-$SPARK_HOME/sbin/start-worker.sh
+
+# Start the SSH server
+/usr/sbin/sshd -D &
 
 # Start PostgreSQL
 service postgresql start
@@ -106,6 +152,7 @@ service postgresql start
 
 # Keep the script running to keep the container alive
 tail -f /dev/null
+
 ```
 
 Save the start-all.sh script.

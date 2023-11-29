@@ -39,6 +39,7 @@ RUN useradd -ms /bin/bash hadoopuser
 # Set password for the hadoopuser
 RUN echo 'hadoopuser:password' | chpasswd
 
+#USER root
 # Configure Hadoop environment variables
 ENV HADOOP_HOME /usr/local/hadoop
 ENV HADOOP_CONF_DIR ${HADOOP_HOME}/etc/hadoop
@@ -88,13 +89,20 @@ RUN wget https://downloads.apache.org/ambari/ambari-${AMBARI_VERSION}/apache-amb
 # Set the AMBARI_HOME environment variable
 ENV AMBARI_HOME /usr/local/ambari
 
-COPY env.sh /usr/local/bin/env.sh
-RUN chmod +x /usr/local/bin/env.sh
 # Copy the start-all.sh script to the container
 COPY start-all.sh /usr/local/bin/start-all.sh
 RUN chmod +x /usr/local/bin/start-all.sh
+
 # Expose necessary ports
 EXPOSE 8080 50070 9000 9870 9864 8888 5432 22
 
-#CMD ["/usr/local/bin/start-all.sh"]
+# Start Hadoop services
+RUN $HADOOP_HOME/sbin/start-dfs.sh
+RUN $HADOOP_HOME/sbin/start-yarn.sh
+
+# Start Spark master and worker
+RUN $SPARK_HOME/sbin/start-master.sh
+#RUN $SPARK_HOME/sbin/start-worker.sh
+
 CMD ["/bin/bash", "/usr/local/bin/start-all.sh"]
+#CMD ["/usr/local/bin/start-all.sh"]
