@@ -51,7 +51,7 @@ ENV PATH $PATH:${HADOOP_HOME}/bin:${HADOOP_HOME}/sbin
 
 # Set JAVA_HOME for Hadoop
 RUN echo "export JAVA_HOME=${JAVA_HOME}" >> ${HADOOP_HOME}/etc/hadoop/hadoop-env.sh && \
-    echo "export PATH=$JAVA_HOME/bin:$PATH" >> ${HADOOP_HOME}/etc/hadoop/hadoop-env.sh
+    echo "export PATH=\$JAVA_HOME/bin:\$PATH" >> ${HADOOP_HOME}/etc/hadoop/hadoop-env.sh
 
 # Download and install Spark
 RUN wget https://downloads.apache.org/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-without-hadoop.tgz && \
@@ -66,7 +66,7 @@ ENV PATH $PATH:${SPARK_HOME}/bin:${SPARK_HOME}/sbin
 # Set JAVA_HOME for Spark
 RUN mkdir -p ${SPARK_HOME}/conf && \
     echo "export JAVA_HOME=${JAVA_HOME}" >> ${SPARK_HOME}/conf/spark-env.sh && \
-    echo "export PATH=$JAVA_HOME/bin:$PATH" >> ${SPARK_HOME}/conf/spark-env.sh
+    echo "export PATH=\$JAVA_HOME/bin:\$PATH" >> ${SPARK_HOME}/conf/spark-env.sh
 
 # Download SLF4J library
 RUN wget https://repo1.maven.org/maven2/org/slf4j/slf4j-api/1.7.32/slf4j-api-1.7.32.jar && \
@@ -88,16 +88,13 @@ RUN wget https://downloads.apache.org/ambari/ambari-${AMBARI_VERSION}/apache-amb
 # Set the AMBARI_HOME environment variable
 ENV AMBARI_HOME /usr/local/ambari
 
-# Copy the env.sh script to the container
 COPY env.sh /usr/local/bin/env.sh
 RUN chmod +x /usr/local/bin/env.sh
-
 # Copy the start-all.sh script to the container
 COPY start-all.sh /usr/local/bin/start-all.sh
 RUN chmod +x /usr/local/bin/start-all.sh
-
 # Expose necessary ports
 EXPOSE 8080 50070 9000 9870 9864 8888 5432 22
 
-# Start the SSH server and run the start-all.sh script
+#CMD ["/usr/local/bin/start-all.sh"]
 CMD ["/bin/bash", "/usr/local/bin/start-all.sh"]
